@@ -1,0 +1,125 @@
+---
+title: "Machine Learning Assignment"
+author: "Vishnu Chevli"
+---
+
+- - - 
+
+### Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+This assignment deals with machine learning algorithm generation, which predict type of activity based on predictors.
+
+```{r, echo=FALSE, results ='hide'}
+library(knitr)
+library(caret)
+opts_chunk$set(eacho = TRUE, warning = FALSE, cache = TRUE)
+```
+
+- - -
+
+### Data Processing
+
+Let's start with data loading. We will also create a validation set with 80-20%
+
+```{r}
+# Loading training and testing file
+training = read.csv('pml-training.csv', header= TRUE, stringsAsFactors = FALSE)
+testing = read.csv('pml-testing.csv', header= TRUE, stringsAsFactors = FALSE)
+
+# Convert outcome variable as factor 
+training$classe = as.factor(training$classe)
+
+# Setting seed for reproducibility
+set.seed(123)
+
+# From training set lets creat validation set with 80-20 ratio
+validIdx = createDataPartition(y = training$classe, p = 0.8, list = FALSE)
+validationSet = training[-validIdx,]
+training = training[validIdx,]
+
+rm(validIdx)             #   Removing variable
+```
+
+Let's find out required predictors from all predictors. Following code set will do cleaning as mentioned below
+ 1. Removing character predictors having blank values
+ 2. Finding numeric predictors having majority NAs
+ 3. Check for near zero variable checking
+
+```{r}
+# Majority of character variables are blank
+ctype = data.frame(Variable = colnames(training), 
+                   ctype = sapply(training, class, USE.NAMES = FALSE))
+# Removing all charactor predicators except classes
+training = training[,setdiff(colnames(training),
+                          ctype[ ctype$ctype == 'character',]$Variable[-37])]
+
+# Finding variable with maximum NA
+resTable = sapply(training, function(x){sum(is.na(x))})
+
+# There are variable with more than 90% of NAs removing them
+training = training[,setdiff(colnames(training),
+                             names(resTable[resTable >= (nrow(training)*0.9)]))]
+
+# X, user_name and time won't be useful so removing those values from predicator
+training = training[,setdiff(colnames(training), 
+                             c('X', 'raw_timestamp_part_1', 
+                               'raw_timestamp_part_2'))]
+
+# Near zero checking, as results are negetive so avoiding 
+nearZeroTrain <- nearZeroVar(training[,-54], saveMetrics = TRUE)
+
+# Removing unnecessary variables
+rm(resTable, ctype, nearZeroTrain)
+```
+
+We have already discarded more than 100 predictors. Now we have only 53 numeric predictors, but still this number is very big. Lets do principle component analysis and keep only those component with only 80% variance (~90% standard deviation)
+
+```{r}
+# Setting seed for reproducibility
+set.seed(123)
+
+# Lets create principal component with 80% threshold
+preCompAna = preProcess(training[,-54], method = 'pca', thresh = 0.8)
+
+# Find out actual values using principal component
+trainPC <- predict(preCompAna, training[,-54])
+```
+
+- - -
+
+### Model Fitting
+
+We have now 13 final predictors. We will fit random forest using train function for training set.
+
+```{r}
+# Setting seed for reproducibility
+set.seed(123)
+
+# Let's fit our model using 
+fit <- train(training$classe~., data = trainPC, method = 'rf')
+
+# Let's check confusion matrix with training values
+confusionMatrix(training$classe,predict(fit,trainPC))
+```
+
+Now let's check our model fit with validation set.
+
+```{r}
+# Creating components for validationSet using training set
+validPC <- predict(preCompAna, validationSet[,colnames(training)[-54]])
+
+# Comparing prediction with actual values in validationSet
+confusionMatrix(validationSet$classe, predict(fit, validPC))
+```
+
+Let's predict values for test set.
+
+```{r}
+# Creating components for testing set using training set components
+testPC <- predict(preCompAna, testing[,colnames(training)[-54]])
+
+# Printing predicted values
+predict(fit, testPC)
+```
